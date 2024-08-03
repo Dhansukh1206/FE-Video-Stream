@@ -6,6 +6,7 @@ import Sidebar from "./Sidebar";
 const PrivateRoute = ({ element: Component }) => {
   const { auth } = useContext(AuthContext);
 
+  console.log("Private auth", auth);
   return auth ? (
     <div className="d-flex">
       <Sidebar />

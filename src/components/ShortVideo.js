@@ -83,7 +83,7 @@ const ShortVideo = () => {
           "Content-Type": "multipart/form-data",
         },
       });
-      console.log("response =>", response);
+      console.log("response", response);
       setMessage("Upload successful!");
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -92,10 +92,10 @@ const ShortVideo = () => {
         setMessage("");
       }, [1500]);
       setVideos([]);
+      fetchVideos();
     } catch (error) {
       setMessage("Upload failed!");
     }
-    fetchVideos();
   };
 
   return (

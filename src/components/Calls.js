@@ -30,7 +30,10 @@ const CallComponent = () => {
   }, []);
 
   useEffect(() => {
-    ws.current = new WebSocket("ws://https://desolate-eyrie-13966-6cda0935eea4.herokuapp.com");
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    ws.current = new WebSocket(
+      `${protocol}://https://desolate-eyrie-13966-6cda0935eea4.herokuapp.com`
+    );
     ws.current.onmessage = handleSignalingData;
 
     return () => {
@@ -82,7 +85,6 @@ const CallComponent = () => {
       setIsCallActive(true);
     } catch (err) {
       setError("Could not start the call. Please try again.");
-      console.error(err);
     }
   };
 
@@ -113,7 +115,6 @@ const CallComponent = () => {
       );
     } catch (err) {
       setError("Could not handle the offer. Please try again.");
-      console.error(err);
     }
   };
 

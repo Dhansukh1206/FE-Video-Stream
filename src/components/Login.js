@@ -1,6 +1,5 @@
 import React, { useState, useContext } from "react";
 import axios from "../api/axios";
-import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 
 const Login = () => {
@@ -8,21 +7,14 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const { login } = useContext(AuthContext);
-  const navigate = useNavigate();
 
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
       const response = await axios.post("/auth/login", { username, password });
-      const { token, expiresIn } = response.data;
-      alert(`${token}`);
-      localStorage.setItem("token", token);
-      const expirationTime = Date.now() + expiresIn * 1000;
-      localStorage.setItem("expirationTime", expirationTime);
-      login(response.data.token);
-      navigate("/shortvideo");
+      const { token } = response.data;
+      login(token);
     } catch (error) {
-      alert(`error: ${error}`);
       setError("Invalid credentials");
     }
   };
