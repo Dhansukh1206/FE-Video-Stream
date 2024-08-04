@@ -1,3 +1,5 @@
+// src/CallComponent.js
+
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Container, Row, Col, Button, Alert } from "react-bootstrap";
 
@@ -6,7 +8,7 @@ const CallComponent = () => {
   const remoteVideoRef = useRef(null);
   const [isCallActive, setIsCallActive] = useState(false);
   const [error, setError] = useState(null);
-
+  const pendingCandidates = useRef([]);
   const ws = useRef(null);
   const localPeerConnection = useRef(null);
   const remoteStream = useRef(new MediaStream());
@@ -32,7 +34,7 @@ const CallComponent = () => {
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     ws.current = new WebSocket(
-      `${protocol}://https://desolate-eyrie-13966-6cda0935eea4.herokuapp.com`
+      `${protocol}://desolate-eyrie-13966-6cda0935eea4.herokuapp.com`
     );
     ws.current.onmessage = handleSignalingData;
 
@@ -90,6 +92,30 @@ const CallComponent = () => {
 
   const handleOffer = async (offer) => {
     try {
+      if (localPeerConnection.current) {
+        localPeerConnection.current.close(); // Close any existing connection
+      }
+
+      localPeerConnection.current = new RTCPeerConnection();
+
+      localPeerConnection.current.ontrack = (event) => {
+        event.streams[0].getTracks().forEach((track) => {
+          remoteStream.current.addTrack(track);
+        });
+        remoteVideoRef.current.srcObject = remoteStream.current;
+      };
+
+      localPeerConnection.current.onicecandidate = (event) => {
+        if (event.candidate) {
+          ws.current.send(
+            JSON.stringify({
+              type: "candidate",
+              candidate: event.candidate,
+            })
+          );
+        }
+      };
+
       await localPeerConnection.current.setRemoteDescription(
         new RTCSessionDescription(offer)
       );
@@ -113,25 +139,70 @@ const CallComponent = () => {
           answer: answer,
         })
       );
+
+      // Add any pending candidates
+      pendingCandidates.current.forEach((candidate) => {
+        localPeerConnection.current.addIceCandidate(
+          new RTCIceCandidate(candidate)
+        );
+      });
+      pendingCandidates.current = [];
     } catch (err) {
       setError("Could not handle the offer. Please try again.");
     }
   };
 
-  const handleAnswer = (answer) => {
-    localPeerConnection.current.setRemoteDescription(
-      new RTCSessionDescription(answer)
-    );
+  const handleAnswer = async (answer) => {
+    try {
+      // Log the signaling state and answer for debugging
+      console.log(
+        "Current signaling state:",
+        localPeerConnection.current.signalingState
+      );
+      console.log("Received answer:", answer);
+
+      // Set the remote description
+      await localPeerConnection.current.setRemoteDescription(
+        new RTCSessionDescription(answer)
+      );
+
+      console.log("Remote description set successfully.");
+    } catch (err) {
+      setError("Failed to set remote answer.");
+      console.error("Error setting remote description:", err); // Log detailed error
+    }
   };
 
   const handleCandidate = (candidate) => {
-    localPeerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+    if (localPeerConnection.current) {
+      localPeerConnection.current.addIceCandidate(
+        new RTCIceCandidate(candidate)
+      );
+    } else {
+      // Queue candidate if the peer connection is not ready
+      pendingCandidates.current.push(candidate);
+    }
   };
 
   const endCall = () => {
-    localPeerConnection.current.close();
+    if (localPeerConnection.current) {
+      localPeerConnection.current.close();
+      localPeerConnection.current = null;
+    }
+
+    // Stop all tracks of the local video stream
+    if (localVideoRef.current && localVideoRef.current.srcObject) {
+      localVideoRef.current.srcObject.getTracks().forEach((track) => {
+        track.stop();
+      });
+      localVideoRef.current.srcObject = null;
+    }
+
     setIsCallActive(false);
     remoteStream.current = new MediaStream();
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
   };
 
   return (
