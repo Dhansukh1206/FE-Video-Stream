@@ -1,41 +1,78 @@
-// src/CallComponent.js
-
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Container, Row, Col, Button, Alert } from "react-bootstrap";
+import {
+  Container,
+  Row,
+  Col,
+  Button,
+  Alert,
+  ListGroup,
+  Badge,
+  Modal,
+} from "react-bootstrap";
+import axios from "../api/axios";
 
 const CallComponent = () => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const [users, setUsers] = useState([]);
+  const [selectedUser, setSelectedUser] = useState(null);
   const [isCallActive, setIsCallActive] = useState(false);
   const [error, setError] = useState(null);
-  const pendingCandidates = useRef([]);
+  const [showCallTypeModal, setShowCallTypeModal] = useState(false); // New state for modal
   const ws = useRef(null);
   const localPeerConnection = useRef(null);
   const remoteStream = useRef(new MediaStream());
+  const pendingCandidates = useRef([]);
 
-  const handleSignalingData = useCallback((message) => {
-    const data = JSON.parse(message.data);
-
-    switch (data.type) {
-      case "offer":
-        handleOffer(data.offer);
-        break;
-      case "answer":
-        handleAnswer(data.answer);
-        break;
-      case "candidate":
-        handleCandidate(data.candidate);
-        break;
-      default:
-        break;
+  const fetchUsers = async () => {
+    try {
+      const response = await axios.get("/users");
+      setUsers(response.data);
+    } catch (err) {
+      setError("Failed to fetch users.");
     }
-  }, []);
+  };
 
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    ws.current = new WebSocket(
-      `${protocol}://desolate-eyrie-13966-6cda0935eea4.herokuapp.com`
-    );
+    fetchUsers();
+  }, []);
+
+  const handleSignalingData = useCallback(
+    (message) => {
+      const data = JSON.parse(message.data);
+
+      switch (data.type) {
+        case "incoming_call":
+          const incomingUser = users.find((user) => user._id === data.from);
+          if (incomingUser) {
+            setSelectedUser(incomingUser);
+            handleOffer(data.offer, incomingUser._id);
+          } else {
+            console.error("User not found for incoming call");
+          }
+          break;
+        case "call_accepted":
+          handleAnswer(data.answer);
+          break;
+        case "candidate":
+          handleCandidate(data.candidate);
+          break;
+        case "end":
+          endCall();
+          break;
+        default:
+          break;
+      }
+    },
+    [users]
+  );
+
+  useEffect(() => {
+    const userId = localStorage.getItem("userId");
+    // const wsUrl = `ws://localhost:8080/?user-id=${userId}`;     // for local test
+    const wsUrl = `wss://desolate-eyrie-13966-6cda0935eea4.herokuapp.com/?user-id=${userId}`; // for live testing
+    ws.current = new WebSocket(wsUrl);
+
     ws.current.onmessage = handleSignalingData;
 
     return () => {
@@ -43,15 +80,23 @@ const CallComponent = () => {
     };
   }, [handleSignalingData]);
 
-  const startCall = async () => {
+  const startCall = async (user, video = true) => {
+    if (!user) {
+      setError("Please select a user to call.");
+      return;
+    }
+
+    setSelectedUser(user);
+
     try {
       const localStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: video,
         audio: true,
       });
       localVideoRef.current.srcObject = localStream;
 
       localPeerConnection.current = new RTCPeerConnection();
+
       localStream.getTracks().forEach((track) => {
         localPeerConnection.current.addTrack(track, localStream);
       });
@@ -69,6 +114,7 @@ const CallComponent = () => {
             JSON.stringify({
               type: "candidate",
               candidate: event.candidate,
+              target: user._id,
             })
           );
         }
@@ -79,8 +125,11 @@ const CallComponent = () => {
 
       ws.current.send(
         JSON.stringify({
-          type: "offer",
+          type: "call",
           offer: offer,
+          target: user._id,
+          userId: localStorage.getItem("userId"),
+          callType: video ? "video" : "voice",
         })
       );
 
@@ -90,10 +139,14 @@ const CallComponent = () => {
     }
   };
 
-  const handleOffer = async (offer) => {
+  const handleOffer = async (offer, fromUserId) => {
     try {
+      if (!offer || !offer.type || !offer.sdp) {
+        throw new Error("Invalid offer received");
+      }
+
       if (localPeerConnection.current) {
-        localPeerConnection.current.close(); // Close any existing connection
+        localPeerConnection.current.close();
       }
 
       localPeerConnection.current = new RTCPeerConnection();
@@ -111,6 +164,7 @@ const CallComponent = () => {
             JSON.stringify({
               type: "candidate",
               candidate: event.candidate,
+              target: fromUserId,
             })
           );
         }
@@ -124,6 +178,7 @@ const CallComponent = () => {
         video: true,
         audio: true,
       });
+
       localVideoRef.current.srcObject = localStream;
 
       localStream.getTracks().forEach((track) => {
@@ -137,16 +192,18 @@ const CallComponent = () => {
         JSON.stringify({
           type: "answer",
           answer: answer,
+          target: fromUserId,
+          userId: localStorage.getItem("userId"),
         })
       );
 
-      // Add any pending candidates
       pendingCandidates.current.forEach((candidate) => {
         localPeerConnection.current.addIceCandidate(
           new RTCIceCandidate(candidate)
         );
       });
       pendingCandidates.current = [];
+      setIsCallActive(true);
     } catch (err) {
       setError("Could not handle the offer. Please try again.");
     }
@@ -154,33 +211,25 @@ const CallComponent = () => {
 
   const handleAnswer = async (answer) => {
     try {
-      // Log the signaling state and answer for debugging
-      console.log(
-        "Current signaling state:",
-        localPeerConnection.current.signalingState
-      );
-      console.log("Received answer:", answer);
-
-      // Set the remote description
       await localPeerConnection.current.setRemoteDescription(
         new RTCSessionDescription(answer)
       );
-
-      console.log("Remote description set successfully.");
     } catch (err) {
-      setError("Failed to set remote answer.");
-      console.error("Error setting remote description:", err); // Log detailed error
+      setError("Could not handle the answer. Please try again.");
     }
   };
 
-  const handleCandidate = (candidate) => {
-    if (localPeerConnection.current) {
-      localPeerConnection.current.addIceCandidate(
-        new RTCIceCandidate(candidate)
-      );
-    } else {
-      // Queue candidate if the peer connection is not ready
-      pendingCandidates.current.push(candidate);
+  const handleCandidate = async (candidate) => {
+    try {
+      if (localPeerConnection.current) {
+        await localPeerConnection.current.addIceCandidate(
+          new RTCIceCandidate(candidate)
+        );
+      } else {
+        pendingCandidates.current.push(candidate);
+      }
+    } catch (err) {
+      setError("Could not add ICE candidate.");
     }
   };
 
@@ -190,51 +239,103 @@ const CallComponent = () => {
       localPeerConnection.current = null;
     }
 
-    // Stop all tracks of the local video stream
     if (localVideoRef.current && localVideoRef.current.srcObject) {
-      localVideoRef.current.srcObject.getTracks().forEach((track) => {
-        track.stop();
-      });
+      const localStream = localVideoRef.current.srcObject;
+      localStream.getTracks().forEach((track) => track.stop());
       localVideoRef.current.srcObject = null;
     }
 
-    setIsCallActive(false);
-    remoteStream.current = new MediaStream();
+    if (remoteStream.current) {
+      remoteStream.current.getTracks().forEach((track) => track.stop());
+      remoteStream.current = new MediaStream();
+    }
+
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
     }
+
+    setIsCallActive(false);
+    setSelectedUser(null);
+
+    ws.current.send(
+      JSON.stringify({
+        type: "end",
+        target: selectedUser ? selectedUser._id : null,
+        userId: localStorage.getItem("userId"),
+      })
+    );
+  };
+
+  const handleUserSelection = (user) => {
+    setSelectedUser(user);
+    setShowCallTypeModal(true); // Show modal when a user is selected
+  };
+
+  const handleCallTypeSelection = (video) => {
+    startCall(selectedUser, video);
+    setShowCallTypeModal(false); // Hide modal after call type is selected
   };
 
   return (
     <Container>
-      <Row className="justify-content-center mt-4">
-        <Col md={6} className="text-center">
-          <h2>Video Call</h2>
+      <Row>
+        <Col md={6}>
+          <h3>Users</h3>
           {error && <Alert variant="danger">{error}</Alert>}
-          <video
-            ref={localVideoRef}
-            autoPlay
-            muted
-            className="w-100 mb-3"
-            style={{ maxHeight: "200px" }}
-          />
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            className="w-100 mb-3"
-            style={{ maxHeight: "200px" }}
-          />
-          {!isCallActive ? (
-            <Button onClick={startCall} variant="success">
-              Start Call
-            </Button>
-          ) : (
-            <Button onClick={endCall} variant="danger">
-              End Call
-            </Button>
-          )}
+          <ListGroup>
+            {users.map((user) => (
+              <ListGroup.Item
+                key={user._id}
+                action
+                active={selectedUser && selectedUser._id === user._id}
+                onClick={() => handleUserSelection(user)} // Use handleUserSelection
+              >
+                {user.username}
+                {user.online && <Badge bg="success">Online</Badge>}
+              </ListGroup.Item>
+            ))}
+          </ListGroup>
+        </Col>
+        <Col md={6}>
+          <h3>Video Call</h3>
+          <div>
+            <video
+              ref={localVideoRef}
+              autoPlay
+              muted
+              style={{ width: "100%" }}
+            />
+            <video ref={remoteVideoRef} autoPlay style={{ width: "100%" }} />
+          </div>
+          <Button variant="danger" onClick={endCall} disabled={!isCallActive}>
+            End Call
+          </Button>
         </Col>
       </Row>
+
+      <Modal
+        show={showCallTypeModal}
+        onHide={() => setShowCallTypeModal(false)}
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>Select Call Type</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Button
+            variant="primary"
+            onClick={() => handleCallTypeSelection(true)}
+            className="me-2"
+          >
+            Video Call
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => handleCallTypeSelection(false)}
+          >
+            Voice Call
+          </Button>
+        </Modal.Body>
+      </Modal>
     </Container>
   );
 };

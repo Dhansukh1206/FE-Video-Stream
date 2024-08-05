@@ -12,8 +12,8 @@ const Login = () => {
     e.preventDefault();
     try {
       const response = await axios.post("/auth/login", { username, password });
-      const { token } = response.data;
-      login(token);
+      const { token, userId } = response.data;
+      login({ token, userId });
     } catch (error) {
       setError("Invalid credentials");
     }

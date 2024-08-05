@@ -36,8 +36,9 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const login = (token) => {
+  const login = ({ token, userId }) => {
     localStorage.setItem("token", token);
+    localStorage.setItem("userId", userId);
     setAuth({ token });
     navigate("/shortvideo");
   };
