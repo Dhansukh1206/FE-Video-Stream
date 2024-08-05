@@ -73,76 +73,146 @@ const CallComponent = () => {
     }
   }, [selectedUser]);
 
-  // Define the handleOffer function
-  const handleOffer = useCallback(async (offer, fromUserId) => {
-    try {
-      if (!offer || !offer.type || !offer.sdp) {
-        throw new Error("Invalid offer received");
-      }
+  // Define the sendMessageWhenReady function
+  const sendMessageWhenReady = useCallback((message) => {
+    if (ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(message);
+    } else {
+      ws.current.addEventListener(
+        "open",
+        () => {
+          ws.current.send(message);
+        },
+        { once: true }
+      );
+    }
+  }, []);
 
-      if (localPeerConnection.current) {
-        localPeerConnection.current.close();
-      }
+  const sendWebSocketMessage = useCallback(
+    (data) => {
+      sendMessageWhenReady(JSON.stringify(data));
+    },
+    [sendMessageWhenReady]
+  );
 
-      localPeerConnection.current = new RTCPeerConnection();
+  const createPeerConnection = useCallback(
+    (targetUserId) => {
+      const peerConnection = new RTCPeerConnection();
 
-      localPeerConnection.current.ontrack = (event) => {
-        event.streams[0].getTracks().forEach((track) => {
-          remoteStream.current.addTrack(track);
-        });
-        remoteVideoRef.current.srcObject = remoteStream.current;
-      };
-
-      localPeerConnection.current.onicecandidate = (event) => {
+      peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
-          ws.current.send(
-            JSON.stringify({
-              type: "candidate",
-              candidate: event.candidate,
-              target: fromUserId,
-            })
-          );
+          sendWebSocketMessage({
+            type: "candidate",
+            candidate: event.candidate,
+            target: targetUserId,
+          });
         }
       };
 
-      await localPeerConnection.current.setRemoteDescription(
-        new RTCSessionDescription(offer)
-      );
+      peerConnection.ontrack = (event) => {
+        event.streams[0].getTracks().forEach((track) => {
+          remoteStream.current.addTrack(track);
+        });
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream.current;
+        }
+      };
 
-      const localStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
+      return peerConnection;
+    },
+    [sendWebSocketMessage]
+  );
 
-      localVideoRef.current.srcObject = localStream;
+  const handleOffer = useCallback(
+    async (offer, fromUserId) => {
+      try {
+        if (!offer || !offer.type || !offer.sdp) {
+          throw new Error("Invalid offer received");
+        }
 
-      localStream.getTracks().forEach((track) => {
-        localPeerConnection.current.addTrack(track, localStream);
-      });
+        // Create a new RTCPeerConnection
+        localPeerConnection.current = createPeerConnection(fromUserId);
 
-      const answer = await localPeerConnection.current.createAnswer();
-      await localPeerConnection.current.setLocalDescription(answer);
+        await localPeerConnection.current.setRemoteDescription(
+          new RTCSessionDescription(offer)
+        );
 
-      ws.current.send(
-        JSON.stringify({
+        const localStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        });
+
+        localVideoRef.current.srcObject = localStream;
+
+        localStream.getTracks().forEach((track) => {
+          localPeerConnection.current.addTrack(track, localStream);
+        });
+
+        const answer = await localPeerConnection.current.createAnswer();
+        await localPeerConnection.current.setLocalDescription(answer);
+
+        sendWebSocketMessage({
           type: "answer",
           answer: answer,
           target: fromUserId,
           userId: localStorage.getItem("userId"),
-        })
-      );
+        });
 
-      pendingCandidates.current.forEach((candidate) => {
-        localPeerConnection.current.addIceCandidate(
-          new RTCIceCandidate(candidate)
-        );
-      });
-      pendingCandidates.current = [];
-      setIsCallActive(true);
-    } catch (err) {
-      setError("Could not handle the offer. Please try again.");
-    }
-  }, []);
+        pendingCandidates.current.forEach((candidate) => {
+          localPeerConnection.current.addIceCandidate(
+            new RTCIceCandidate(candidate)
+          );
+        });
+        pendingCandidates.current = [];
+        setIsCallActive(true);
+      } catch (err) {
+        setError("Could not handle the offer. Please try again.");
+      }
+    },
+    [createPeerConnection, sendWebSocketMessage]
+  );
+
+  const startCall = useCallback(
+    async (user, video = true) => {
+      if (!user) {
+        setError("Please select a user to call.");
+        return;
+      }
+
+      setSelectedUser(user);
+
+      try {
+        const localStream = await navigator.mediaDevices.getUserMedia({
+          video: video,
+          audio: true,
+        });
+        localVideoRef.current.srcObject = localStream;
+
+        // Create a new RTCPeerConnection
+        localPeerConnection.current = createPeerConnection(user._id);
+
+        localStream.getTracks().forEach((track) => {
+          localPeerConnection.current.addTrack(track, localStream);
+        });
+
+        const offer = await localPeerConnection.current.createOffer();
+        await localPeerConnection.current.setLocalDescription(offer);
+
+        sendWebSocketMessage({
+          type: "call",
+          offer: offer,
+          target: user._id,
+          userId: localStorage.getItem("userId"),
+          callType: video ? "video" : "voice",
+        });
+
+        setIsCallActive(true);
+      } catch (err) {
+        setError("Could not start the call. Please try again.");
+      }
+    },
+    [createPeerConnection, sendWebSocketMessage]
+  );
 
   // Define the handleAnswer function
   const handleAnswer = useCallback(async (answer) => {
@@ -213,66 +283,6 @@ const CallComponent = () => {
       ws.current.close();
     };
   }, [handleSignalingData]);
-
-  // Define the startCall function
-  const startCall = useCallback(async (user, video = true) => {
-    if (!user) {
-      setError("Please select a user to call.");
-      return;
-    }
-
-    setSelectedUser(user);
-
-    try {
-      const localStream = await navigator.mediaDevices.getUserMedia({
-        video: video,
-        audio: true,
-      });
-      localVideoRef.current.srcObject = localStream;
-
-      localPeerConnection.current = new RTCPeerConnection();
-
-      localStream.getTracks().forEach((track) => {
-        localPeerConnection.current.addTrack(track, localStream);
-      });
-
-      localPeerConnection.current.ontrack = (event) => {
-        event.streams[0].getTracks().forEach((track) => {
-          remoteStream.current.addTrack(track);
-        });
-        remoteVideoRef.current.srcObject = remoteStream.current;
-      };
-
-      localPeerConnection.current.onicecandidate = (event) => {
-        if (event.candidate) {
-          ws.current.send(
-            JSON.stringify({
-              type: "candidate",
-              candidate: event.candidate,
-              target: user._id,
-            })
-          );
-        }
-      };
-
-      const offer = await localPeerConnection.current.createOffer();
-      await localPeerConnection.current.setLocalDescription(offer);
-
-      ws.current.send(
-        JSON.stringify({
-          type: "call",
-          offer: offer,
-          target: user._id,
-          userId: localStorage.getItem("userId"),
-          callType: video ? "video" : "voice",
-        })
-      );
-
-      setIsCallActive(true);
-    } catch (err) {
-      setError("Could not start the call. Please try again.");
-    }
-  }, []);
 
   const handleUserSelection = (user) => {
     setSelectedUser(user);
