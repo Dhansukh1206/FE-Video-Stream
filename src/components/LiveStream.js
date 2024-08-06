@@ -14,7 +14,7 @@ const LiveStream = () => {
     const userId = localStorage.getItem("userId");
     // const wsUrl = `ws://localhost:8080/?stream=${userId}`; // for local test
     const wsUrl = `wss://desolate-eyrie-13966-6cda0935eea4.herokuapp.com/?stream=${userId}`; // for live testing
-    ws.current = new WebSocket(wsUrl);
+    wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current = new WebSocket(`ws://localhost:8080/?stream-id=${userId}`);
 
