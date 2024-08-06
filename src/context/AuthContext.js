@@ -22,8 +22,8 @@ export const AuthProvider = ({ children }) => {
     try {
       const decoded = jwtDecode(token);
       const currentTime = Date.now() / 1000;
-      const currentDate = new Date(currentTime * 1000); // Convert to milliseconds
-      const expirationDate = new Date(decoded.exp * 1000); // Convert to milliseconds
+      const currentDate = new Date(currentTime * 1000);
+      const expirationDate = new Date(decoded.exp * 1000);
 
       console.log("Current Date:", currentDate.toLocaleString());
       console.log("Token Expiration Date:", expirationDate.toLocaleString());
@@ -36,15 +36,18 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const login = ({ token, userId }) => {
+  const login = ({ token, userId, userName }) => {
     localStorage.setItem("token", token);
     localStorage.setItem("userId", userId);
+    localStorage.setItem("userName", userName);
     setAuth({ token });
     navigate("/shortvideo");
   };
 
   const logout = () => {
     localStorage.removeItem("token");
+    localStorage.removeItem("userId");
+    localStorage.removeItem("userName");
     setAuth(null);
     navigate("/");
   };

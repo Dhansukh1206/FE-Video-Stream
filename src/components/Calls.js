@@ -18,7 +18,7 @@ const CallComponent = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [isCallActive, setIsCallActive] = useState(false);
   const [error, setError] = useState(null);
-  const [showCallTypeModal, setShowCallTypeModal] = useState(false); // New state for modal
+  const [showCallTypeModal, setShowCallTypeModal] = useState(false);
   const ws = useRef(null);
   const localPeerConnection = useRef(null);
   const remoteStream = useRef(new MediaStream());
@@ -37,7 +37,6 @@ const CallComponent = () => {
     fetchUsers();
   }, []);
 
-  // Define the endCall function
   const endCall = useCallback(() => {
     if (localPeerConnection.current) {
       localPeerConnection.current.close();
@@ -73,7 +72,6 @@ const CallComponent = () => {
     }
   }, [selectedUser]);
 
-  // Define the sendMessageWhenReady function
   const sendMessageWhenReady = useCallback((message) => {
     if (ws.current.readyState === WebSocket.OPEN) {
       ws.current.send(message);
@@ -130,7 +128,6 @@ const CallComponent = () => {
           throw new Error("Invalid offer received");
         }
 
-        // Create a new RTCPeerConnection
         localPeerConnection.current = createPeerConnection(fromUserId);
 
         await localPeerConnection.current.setRemoteDescription(
@@ -188,7 +185,6 @@ const CallComponent = () => {
         });
         localVideoRef.current.srcObject = localStream;
 
-        // Create a new RTCPeerConnection
         localPeerConnection.current = createPeerConnection(user._id);
 
         localStream.getTracks().forEach((track) => {
@@ -214,7 +210,6 @@ const CallComponent = () => {
     [createPeerConnection, sendWebSocketMessage]
   );
 
-  // Define the handleAnswer function
   const handleAnswer = useCallback(async (answer) => {
     try {
       await localPeerConnection.current.setRemoteDescription(
@@ -225,7 +220,6 @@ const CallComponent = () => {
     }
   }, []);
 
-  // Define the handleCandidate function
   const handleCandidate = useCallback(async (candidate) => {
     try {
       if (localPeerConnection.current) {
@@ -240,7 +234,6 @@ const CallComponent = () => {
     }
   }, []);
 
-  // Define the handleSignalingData function
   const handleSignalingData = useCallback(
     (message) => {
       const data = JSON.parse(message.data);
@@ -273,7 +266,7 @@ const CallComponent = () => {
 
   useEffect(() => {
     const userId = localStorage.getItem("userId");
-    // const wsUrl = `ws://localhost:8080/?user-id=${userId}`;     // for local test
+    // const wsUrl = `ws://localhost:8080/?user-id=${userId}`; // for local test
     const wsUrl = `wss://desolate-eyrie-13966-6cda0935eea4.herokuapp.com/?user-id=${userId}`; // for live testing
     ws.current = new WebSocket(wsUrl);
 
@@ -286,12 +279,12 @@ const CallComponent = () => {
 
   const handleUserSelection = (user) => {
     setSelectedUser(user);
-    setShowCallTypeModal(true); // Show modal when a user is selected
+    setShowCallTypeModal(true);
   };
 
   const handleCallTypeSelection = (video) => {
     startCall(selectedUser, video);
-    setShowCallTypeModal(false); // Hide modal after call type is selected
+    setShowCallTypeModal(false);
   };
 
   return (
@@ -306,7 +299,7 @@ const CallComponent = () => {
                 key={user._id}
                 action
                 active={selectedUser && selectedUser._id === user._id}
-                onClick={() => handleUserSelection(user)} // Use handleUserSelection
+                onClick={() => handleUserSelection(user)}
               >
                 {user.username}
                 {user.online && <Badge bg="success">Online</Badge>}
