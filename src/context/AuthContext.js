@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { jwtDecode } from "jwt-decode";
+import { setAuthToken } from "../api/axios";
 
 export const AuthContext = createContext();
 
@@ -13,6 +14,7 @@ export const AuthProvider = ({ children }) => {
 
     if (token && validateToken(token)) {
       setAuth({ token });
+      setAuthToken(token);
     } else {
       setAuth(null);
     }
@@ -36,12 +38,12 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const login = ({ token, userId, userName }) => {
+  const login = async ({ token, userId, userName }) => {
     localStorage.setItem("token", token);
     localStorage.setItem("userId", userId);
     localStorage.setItem("userName", userName);
     setAuth({ token });
-    navigate("/shortvideo");
+    setAuthToken(token);
   };
 
   const logout = () => {
@@ -49,6 +51,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem("userId");
     localStorage.removeItem("userName");
     setAuth(null);
+    setAuthToken(null);
     navigate("/");
   };
 
