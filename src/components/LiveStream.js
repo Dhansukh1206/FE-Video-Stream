@@ -10,10 +10,11 @@ const LiveStream = () => {
   const wsRef = useRef(null);
   const peerConnectionRef = useRef(null);
 
+  // Initialize WebSocket
   const initializeWebSocket = useCallback(() => {
-    const userId = localStorage.getItem("userId");
-    // const wsUrl = `ws://localhost:8080/?stream=${userId}`; // for local test
-    const wsUrl = `wss://desolate-eyrie-13966-6cda0935eea4.herokuapp.com/?stream=${userId}`; // for live testing
+    const userId = localStorage.getItem("userId") || "guest";
+    const wsUrl = `ws://localhost:8080/?stream-id=${userId}`; // for local test
+    // const wsUrl = `wss://your-live-server-url/?stream-id=${userId}`; // for live testing
     wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current.onopen = () => {
@@ -22,6 +23,7 @@ const LiveStream = () => {
 
     wsRef.current.onmessage = async (event) => {
       const data = JSON.parse(event.data);
+      console.log("Received WebSocket message:", data);
 
       switch (data.type) {
         case "chat":
@@ -34,9 +36,12 @@ const LiveStream = () => {
           await handleReceiveAnswer(data.answer);
           break;
         case "candidate":
-          await handleReceiveCandidate(data.candidate);
+          setTimeout(() => {
+            handleReceiveCandidate(data.candidate);
+          }, 4000);
           break;
         default:
+          console.log("Unknown message type:", data.type);
           break;
       }
     };
@@ -78,18 +83,16 @@ const LiveStream = () => {
         audio: true,
       });
       localStreamRef.current = stream;
+      localVideoRef.current.srcObject = stream;
 
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-        localVideoRef.current.play();
-      }
-
-      const peerConnection = new RTCPeerConnection();
+      const peerConnection = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
       peerConnectionRef.current = peerConnection;
 
-      stream.getTracks().forEach((track) => {
-        peerConnection.addTrack(track, stream);
-      });
+      stream
+        .getTracks()
+        .forEach((track) => peerConnection.addTrack(track, stream));
 
       peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
@@ -100,17 +103,17 @@ const LiveStream = () => {
       };
 
       peerConnection.ontrack = (event) => {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-        }
+        remoteVideoRef.current.srcObject = event.streams[0];
       };
 
+      console.log("Creating offer...");
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
+      console.log("Offer created and set as local description:", offer);
 
       wsRef.current.send(JSON.stringify({ type: "offer", offer }));
     } catch (error) {
-      console.error("Error accessing media devices:", error);
+      console.error("Error starting streaming:", error);
     }
   };
 
@@ -127,7 +130,11 @@ const LiveStream = () => {
 
   const handleReceiveOffer = async (offer) => {
     try {
-      const peerConnection = new RTCPeerConnection();
+      console.log("Received offer:", offer);
+
+      const peerConnection = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
       peerConnectionRef.current = peerConnection;
 
       peerConnection.onicecandidate = (event) => {
@@ -139,16 +146,18 @@ const LiveStream = () => {
       };
 
       peerConnection.ontrack = (event) => {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-        }
+        remoteVideoRef.current.srcObject = event.streams[0];
       };
 
       await peerConnection.setRemoteDescription(
         new RTCSessionDescription(offer)
       );
+      console.log("Offer set as remote description.");
+
+      console.log("Creating answer...");
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
+      console.log("Answer created and set as local description:", answer);
 
       wsRef.current.send(JSON.stringify({ type: "answer", answer }));
     } catch (error) {
@@ -158,15 +167,26 @@ const LiveStream = () => {
 
   const handleReceiveAnswer = async (answer) => {
     try {
-      if (peerConnectionRef.current.signalingState === "have-local-offer") {
-        await peerConnectionRef.current.setRemoteDescription(
-          new RTCSessionDescription(answer)
-        );
-      } else {
-        console.warn(
-          "Received answer in wrong state:",
+      if (peerConnectionRef.current) {
+        console.log(
+          "Current signaling state:",
           peerConnectionRef.current.signalingState
         );
+        console.log("Received answer:", answer);
+
+        if (peerConnectionRef.current.signalingState === "have-local-offer") {
+          await peerConnectionRef.current.setRemoteDescription(
+            new RTCSessionDescription(answer)
+          );
+          console.log("Answer set successfully.");
+        } else {
+          console.warn(
+            "Received answer in wrong state:",
+            peerConnectionRef.current.signalingState
+          );
+        }
+      } else {
+        console.error("Peer connection is not initialized.");
       }
     } catch (error) {
       console.error("Error handling answer:", error);
@@ -175,9 +195,14 @@ const LiveStream = () => {
 
   const handleReceiveCandidate = async (candidate) => {
     try {
-      await peerConnectionRef.current.addIceCandidate(
-        new RTCIceCandidate(candidate)
-      );
+      if (peerConnectionRef.current) {
+        console.log("Adding ICE candidate:", candidate);
+        await peerConnectionRef.current.addIceCandidate(
+          new RTCIceCandidate(candidate)
+        );
+      } else {
+        console.error("Peer connection is not ready.");
+      }
     } catch (error) {
       console.error("Error adding received ICE candidate:", error);
     }
@@ -188,6 +213,7 @@ const LiveStream = () => {
       const message = { type: "chat", content: chatInput };
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify(message));
+        setMessages((prevMessages) => [...prevMessages, message]); // Update the chat for the sender
         setChatInput("");
       }
     }
@@ -211,11 +237,21 @@ const LiveStream = () => {
           muted
           style={{ width: "100%", display: streaming ? "block" : "none" }}
         />
-        <video
-          ref={remoteVideoRef}
-          autoPlay
-          style={{ width: "100%", display: streaming ? "none" : "block" }}
-        />
+        {
+          (console.log("streaming", streaming),
+          console.log("localVideoRef", localVideoRef),
+          console.log("remoteVideoRef", remoteVideoRef))
+        }
+        {remoteVideoRef !== null && (
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            style={{
+              width: "100%",
+              //  display: !streaming ? "block" : "none"
+            }}
+          />
+        )}
       </div>
       <div className="chat-box">
         <h2>Chat:</h2>
