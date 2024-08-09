@@ -2,19 +2,20 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 
 const LiveStream = () => {
   const [streaming, setStreaming] = useState(false);
+  const [watching, setWatching] = useState(false);
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
+  const [canWatch, setCanWatch] = useState(false);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const localStreamRef = useRef(null);
   const wsRef = useRef(null);
   const peerConnectionRef = useRef(null);
 
-  // Initialize WebSocket
   const initializeWebSocket = useCallback(() => {
     const userId = localStorage.getItem("userId") || "guest";
     // const wsUrl = `ws://localhost:8080/?stream-id=${userId}`; // for local test
-    const wsUrl = `wss://desolate-eyrie-13966-6cda0935eea4.herokuapp.com/?user-id=${userId}`; // for live testing
+    const wsUrl = `wss://desolate-eyrie-13966-6cda0935eea4.herokuapp.com/?stream-id=${userId}`; // for live testing
     wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current.onopen = () => {
@@ -36,9 +37,7 @@ const LiveStream = () => {
           await handleReceiveAnswer(data.answer);
           break;
         case "candidate":
-          setTimeout(() => {
-            handleReceiveCandidate(data.candidate);
-          }, 4000);
+          await handleReceiveCandidate(data.candidate);
           break;
         default:
           console.log("Unknown message type:", data.type);
@@ -88,6 +87,8 @@ const LiveStream = () => {
       const peerConnection = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
+
+      console.log("peerConnection  => ", peerConnection);
       peerConnectionRef.current = peerConnection;
 
       stream
@@ -96,6 +97,7 @@ const LiveStream = () => {
 
       peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
+          console.log("Sending ICE candidate:", event.candidate);
           wsRef.current.send(
             JSON.stringify({ type: "candidate", candidate: event.candidate })
           );
@@ -103,6 +105,7 @@ const LiveStream = () => {
       };
 
       peerConnection.ontrack = (event) => {
+        console.log("Received remote track:", event);
         remoteVideoRef.current.srcObject = event.streams[0];
       };
 
@@ -112,6 +115,7 @@ const LiveStream = () => {
       console.log("Offer created and set as local description:", offer);
 
       wsRef.current.send(JSON.stringify({ type: "offer", offer }));
+      setCanWatch(false);
     } catch (error) {
       console.error("Error starting streaming:", error);
     }
@@ -126,6 +130,7 @@ const LiveStream = () => {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+    setCanWatch(true); // Re-enable "Watch Live" button when streaming stops
   };
 
   const handleReceiveOffer = async (offer) => {
@@ -139,6 +144,7 @@ const LiveStream = () => {
 
       peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
+          console.log("Sending ICE candidate:", event.candidate);
           wsRef.current.send(
             JSON.stringify({ type: "candidate", candidate: event.candidate })
           );
@@ -146,7 +152,12 @@ const LiveStream = () => {
       };
 
       peerConnection.ontrack = (event) => {
-        remoteVideoRef.current.srcObject = event.streams[0];
+        console.log("Received remote track:", event);
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        } else {
+          console.warn("remoteVideoRef is not set yet.");
+        }
       };
 
       await peerConnection.setRemoteDescription(
@@ -223,12 +234,36 @@ const LiveStream = () => {
     <div className="container">
       <h1 className="text-center mb-4">Live Stream</h1>
       <div className="text-center mb-4">
-        <button
-          className="btn btn-primary me-2"
-          onClick={() => setStreaming(!streaming)}
-        >
-          {streaming ? "Stop Streaming" : "Start Streaming"}
-        </button>
+        {!streaming && (
+          <button
+            className="btn btn-primary me-2"
+            onClick={() => setStreaming(true)}
+          >
+            Start Streaming
+          </button>
+        )}
+        {streaming && (
+          <button
+            className="btn btn-danger me-2"
+            onClick={() => {
+              setStreaming(false);
+              setWatching(false);
+            }}
+          >
+            Stop Streaming
+          </button>
+        )}
+        {!streaming && (
+          <button
+            className="btn btn-success me-2"
+            onClick={() => {
+              setWatching(true);
+            }}
+            disabled={!canWatch}
+          >
+            Watch Live
+          </button>
+        )}
       </div>
       <div className="stream-video w-25">
         <video
@@ -237,19 +272,11 @@ const LiveStream = () => {
           muted
           style={{ width: "100%", display: streaming ? "block" : "none" }}
         />
-        {
-          (console.log("streaming", streaming),
-          console.log("localVideoRef", localVideoRef),
-          console.log("remoteVideoRef", remoteVideoRef))
-        }
-        {remoteVideoRef !== null && (
+        {watching && (
           <video
             ref={remoteVideoRef}
             autoPlay
-            style={{
-              width: "100%",
-              //  display: !streaming ? "block" : "none"
-            }}
+            style={{ width: "100%", display: watching ? "block" : "none" }}
           />
         )}
       </div>
