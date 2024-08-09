@@ -39,6 +39,9 @@ const LiveStream = () => {
         case "candidate":
           await handleReceiveCandidate(data.candidate);
           break;
+        case "stop":
+          handleStopStream();
+          break;
         default:
           console.log("Unknown message type:", data.type);
           break;
@@ -52,6 +55,7 @@ const LiveStream = () => {
     wsRef.current.onerror = (error) => {
       console.error("WebSocket error:", error);
     };
+    
   }, []);
 
   useEffect(() => {
@@ -130,6 +134,15 @@ const LiveStream = () => {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+
+    // Check if WebSocket connection is open before sending a message
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // Notify watchers that the stream has stopped
+      wsRef.current.send(JSON.stringify({ type: "stop" }));
+    } else {
+      console.warn("WebSocket is not open. Unable to send 'stop' message.");
+    }
+
     setCanWatch(true); // Re-enable "Watch Live" button when streaming stops
   };
 
@@ -228,6 +241,19 @@ const LiveStream = () => {
         setChatInput("");
       }
     }
+  };
+
+  const handleStopStream = () => {
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    setWatching(false);
+    setCanWatch(true);
+    console.log("Stream has been stopped by the broadcaster.");
   };
 
   return (
